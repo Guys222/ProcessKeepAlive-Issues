@@ -1,0 +1,22 @@
+name: notify
+on:
+  schedule: [{cron: "*/10 * * * *"}]
+  workflow_dispatch:
+permissions: {issues: read}
+jobs:
+  n:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@v4
+        with: {path: .c, key: c-${{ github.run_id }}, restore-keys: c-}
+      - env: {T: "${{ secrets.GITHUB_TOKEN }}", P: "${{ secrets.PUSHPLUS_TOKEN }}"}
+        run: |
+          curl -s -H "Authorization: Bearer $T" "https://api.github.com/repos/$GITHUB_REPOSITORY/issues?state=all&per_page=10" > i.json
+          M=$(jq -r '[.[]|select(.pull_request==null)|.number]|max//0' i.json)
+          [ -f .c ] || { echo $M > .c; exit 0; }
+          C=$(cat .c)
+          jq -c --argjson c $C '.[]|select(.pull_request==null and .number>$c)' i.json | while read -r x; do
+            N=$(echo "$x"|jq -r .number); S=$(echo "$x"|jq -r .title); L=$(echo "$x"|jq -r .html_url)
+            jq -n --arg t "#$N $S" --arg c "$L" --arg tk "$P" '{token:$tk,title:$t,content:$c}' | curl -s -X POST -H 'Content-Type: application/json' -d @- https://www.pushplus.plus/send >/dev/null
+          done
+          echo $M > .c
